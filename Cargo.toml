@@ -21,7 +21,7 @@ ilp64 = []
 [dependencies]
 
 [build-dependencies]
-bindgen = "0.54"
+bindgen = "0.59"
 
 # Need opt-level = 2 for `bindgen` to be able to finish in reasonable time (i.e. 30 secs instead of 10 minutes)
 [profile.dev.package.bindgen]

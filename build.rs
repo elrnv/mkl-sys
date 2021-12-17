@@ -4,45 +4,37 @@ use std::env;
 use std::path::PathBuf;
 
 /// Paths required for linking to MKL from MKLROOT folder
-struct MklDirectories {
+struct OneAPIDirectories {
     lib_dir: String,
     omp_lib_dir: String,
     include_dir: String,
 }
 
-impl MklDirectories {
+impl OneAPIDirectories {
     /// Constructs paths required for linking MKL from the specified root folder. Checks if paths exist.
-    fn try_new(mkl_root: &str) -> Result<Self, String> {
+    fn try_new(openapi_root: &str) -> Result<Self, String> {
         let os = if cfg!(target_os = "windows") {
             "win"
         } else if cfg!(target_os = "linux") {
             "lin"
+        } else if cfg!(target_os = "macos") {
+            "mac"
         } else {
             return Err("Target OS not supported".into());
         };
 
-        let arch = if cfg!(target_arch = "x86_64") {
-            "64"
-        } else {
-            return Err("Target architecture not supported".into());
-        };
-
-        let mkl_root: String = mkl_root.into();
-        let prefix: String = mkl_root.clone();
-        let exec_prefix: String = prefix.clone();
+        let mkl_root: String = format!("{}/mkl/latest", openapi_root);
+        let compiler_root: String = format!("{}/compiler/latest", openapi_root);
         let lib_dir = format!(
-            "{exec_prefix}/lib/intel{arch}_{os}",
-            exec_prefix = exec_prefix,
-            arch = arch,
-            os = os
+            "{}/lib",
+            mkl_root,
         );
         let omp_lib_dir = format!(
-            "{exec_prefix}/../compiler/lib/intel{arch}_{os}",
-            exec_prefix = exec_prefix,
-            arch = arch,
+            "{compiler_root}/{os}/compiler/lib",
+            compiler_root = compiler_root,
             os = os
         );
-        let include_dir = format!("{prefix}/include", prefix = prefix);
+        let include_dir = format!("{}/include", mkl_root);
 
         let mkl_root_path = PathBuf::from(mkl_root);
         let lib_dir_path = PathBuf::from(lib_dir);
@@ -92,7 +84,7 @@ impl MklDirectories {
             );
         }
 
-        Ok(MklDirectories {
+        Ok(OneAPIDirectories {
             lib_dir: lib_dir_str.into(),
             omp_lib_dir: omp_lib_dir_str.into(),
             include_dir: include_dir_str.into(),
@@ -100,15 +92,15 @@ impl MklDirectories {
     }
 }
 
-fn get_lib_dirs(mkl_dirs: &MklDirectories) -> Vec<String> {
+fn get_lib_dirs(oneapi_dirs: &OneAPIDirectories) -> Vec<String> {
     if cfg!(feature = "openmp") {
-        vec![mkl_dirs.lib_dir.clone(), mkl_dirs.omp_lib_dir.clone()]
+        vec![oneapi_dirs.lib_dir.clone(), oneapi_dirs.omp_lib_dir.clone()]
     } else {
-        vec![mkl_dirs.lib_dir.clone()]
+        vec![oneapi_dirs.lib_dir.clone()]
     }
 }
 
-fn get_link_libs_windows() -> Vec<String> {
+fn get_dynamic_link_libs_windows() -> Vec<String> {
     // Note: The order of the libraries is very important
     let mut libs = Vec::new();
 
@@ -133,7 +125,7 @@ fn get_link_libs_windows() -> Vec<String> {
     libs.into_iter().map(|s| s.into()).collect()
 }
 
-fn get_link_libs_linux() -> Vec<String> {
+fn get_dynamic_link_libs_linux() -> Vec<String> {
     // Note: The order of the libraries is very important
     let mut libs = Vec::new();
 
@@ -159,17 +151,64 @@ fn get_link_libs_linux() -> Vec<String> {
     libs.into_iter().map(|s| s.into()).collect()
 }
 
-fn get_link_libs() -> Vec<String> {
+fn get_dynamic_link_libs_macos() -> Vec<String> {
+    // Note: The order of the libraries is very important
+    let mut libs = Vec::new();
+
+    if cfg!(feature = "openmp") {
+        libs.push("iomp5");
+    }
+    libs.extend(vec!["pthread", "m", "dl"]);
+
+    libs.into_iter().map(|s| s.into()).collect()
+}
+
+fn get_static_link_libs_macos() -> Vec<String> {
+    // Note: The order of the libraries is very important
+    let mut libs = Vec::new();
+
+    if cfg!(feature = "ilp64") {
+        libs.push("mkl_intel_ilp64");
+    } else {
+        libs.push("mkl_intel_lp64");
+    };
+
+    if cfg!(feature = "openmp") {
+        libs.push("mkl_intel_thread");
+    } else {
+        libs.push("mkl_sequential");
+    };
+
+    libs.push("mkl_core");
+
+    libs.into_iter().map(|s| s.into()).collect()
+}
+
+fn get_dynamic_link_libs() -> Vec<String> {
     if cfg!(target_os = "windows") {
-        get_link_libs_windows()
+        get_dynamic_link_libs_windows()
     } else if cfg!(target_os = "linux") {
-        get_link_libs_linux()
+        get_dynamic_link_libs_linux()
+    } else if cfg!(target_os = "macos") {
+        get_dynamic_link_libs_macos()
     } else {
         panic!("Target OS not supported");
     }
 }
 
-fn get_cflags_windows(mkl_dirs: &MklDirectories) -> Vec<String> {
+fn get_static_link_libs() -> Vec<String> {
+    if cfg!(target_os = "windows") {
+        vec![]
+    } else if cfg!(target_os = "linux") {
+        vec![]
+    } else if cfg!(target_os = "macos") {
+        get_static_link_libs_macos()
+    } else {
+        panic!("Target OS not supported");
+    }
+}
+
+fn get_cflags_windows(oneapi_dirs: &OneAPIDirectories) -> Vec<String> {
     let mut cflags = Vec::new();
 
     if cfg!(feature = "ilp64") {
@@ -177,11 +216,11 @@ fn get_cflags_windows(mkl_dirs: &MklDirectories) -> Vec<String> {
     }
 
     cflags.push("--include-directory".into());
-    cflags.push(format!("{}", mkl_dirs.include_dir));
+    cflags.push(format!("{}", oneapi_dirs.include_dir));
     cflags
 }
 
-fn get_cflags_linux(mkl_dirs: &MklDirectories) -> Vec<String> {
+fn get_cflags_linux(oneapi_dirs: &OneAPIDirectories) -> Vec<String> {
     let mut cflags = Vec::new();
 
     if cfg!(feature = "ilp64") {
@@ -189,15 +228,29 @@ fn get_cflags_linux(mkl_dirs: &MklDirectories) -> Vec<String> {
     }
 
     cflags.push("-I".into());
-    cflags.push(format!("{}", mkl_dirs.include_dir));
+    cflags.push(format!("{}", oneapi_dirs.include_dir));
     cflags
 }
 
-fn get_cflags(mkl_dirs: &MklDirectories) -> Vec<String> {
+fn get_cflags_macos(oneapi_dirs: &OneAPIDirectories) -> Vec<String> {
+    let mut cflags = Vec::new();
+
+    if cfg!(feature = "ilp64") {
+        cflags.push("-DMKL_ILP64".into());
+    }
+
+    cflags.push("-I".into());
+    cflags.push(format!("{}", oneapi_dirs.include_dir));
+    cflags
+}
+
+fn get_cflags(oneapi_dirs: &OneAPIDirectories) -> Vec<String> {
     if cfg!(target_os = "windows") {
-        get_cflags_windows(mkl_dirs)
+        get_cflags_windows(oneapi_dirs)
     } else if cfg!(target_os = "linux") {
-        get_cflags_linux(mkl_dirs)
+        get_cflags_linux(oneapi_dirs)
+    } else if cfg!(target_os = "macos") {
+        get_cflags_macos(oneapi_dirs)
     } else {
         panic!("Target OS not supported");
     }
@@ -243,24 +296,27 @@ like to generate symbols for all modules."
     // Link with the proper MKL libraries and simultaneously set up arguments for bindgen.
     // Otherwise we don't get e.g. the correct MKL preprocessor definitions).
     let clang_args = {
-        let mklroot = match env::var("MKLROOT") {
-            Ok(mklroot) => mklroot,
+        let oneapi_root = match env::var("ONEAPI_ROOT") {
+            Ok(oneapi_root) => oneapi_root,
             Err(_) => panic!(
-"Environment variable 'MKLROOT' is not defined. Remember to run the mklvars script bundled
-with MKL in order to set up the required environment variables."),
+"Environment variable 'ONEAPI_ROOT' is not defined. Remember to run the setvars script bundled
+with oneAPI in order to set up the required environment variables."),
         };
 
-        let mkl_dirs = MklDirectories::try_new(&mklroot).unwrap();
+        let oneapi_dirs = OneAPIDirectories::try_new(&oneapi_root).unwrap();
 
-        for lib_dir in get_lib_dirs(&mkl_dirs) {
+        for lib_dir in get_lib_dirs(&oneapi_dirs) {
             println!("cargo:rustc-link-search=native={}", lib_dir);
         }
 
-        for lib in get_link_libs() {
+        for lib in get_dynamic_link_libs() {
             println!("cargo:rustc-link-lib={}", lib);
         }
+        for lib in get_static_link_libs() {
+            println!("cargo:rustc-link-lib=static={}", lib);
+        }
 
-        let args = get_cflags(&mkl_dirs);
+        let args = get_cflags(&oneapi_dirs);
         args
     };
 
