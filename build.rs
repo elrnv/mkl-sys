@@ -16,23 +16,34 @@ impl OneAPIDirectories {
         let os = if cfg!(target_os = "windows") {
             "win"
         } else if cfg!(target_os = "linux") {
-            "lin"
+            "linux"
         } else if cfg!(target_os = "macos") {
             "mac"
         } else {
             return Err("Target OS not supported".into());
         };
 
+        // TODO determine if we need to support ia32 as well
+        let itype = "intel64";
+        let omp_lib_subdir = if cfg!(target_os = "linux") {
+            format!("/{}_lin", itype)
+        } else {
+            String::new()
+        };
+
+        let lib_subdir = if cfg!(target_os = "linux") {
+            format!("/{}", itype)
+        } else {
+            String::new()
+        };
+
         let mkl_root: String = format!("{}/mkl/latest", openapi_root);
         let compiler_root: String = format!("{}/compiler/latest", openapi_root);
         let lib_dir = format!(
-            "{}/lib",
-            mkl_root,
+            "{mkl_root}/lib{lib_subdir}",
         );
         let omp_lib_dir = format!(
-            "{compiler_root}/{os}/compiler/lib",
-            compiler_root = compiler_root,
-            os = os
+            "{compiler_root}/{os}/compiler/lib{omp_lib_subdir}",
         );
         let include_dir = format!("{}/include", mkl_root);
 
@@ -129,19 +140,19 @@ fn get_dynamic_link_libs_linux() -> Vec<String> {
     // Note: The order of the libraries is very important
     let mut libs = Vec::new();
 
-    if cfg!(feature = "ilp64") {
-        libs.push("mkl_intel_ilp64");
-    } else {
-        libs.push("mkl_intel_lp64");
-    };
-
-    if cfg!(feature = "openmp") {
-        libs.push("mkl_intel_thread");
-    } else {
-        libs.push("mkl_sequential");
-    };
-
-    libs.push("mkl_core");
+    // if cfg!(feature = "ilp64") {
+    //     libs.push("mkl_intel_ilp64");
+    // } else {
+    //     libs.push("mkl_intel_lp64");
+    // };
+    //
+    // if cfg!(feature = "openmp") {
+    //     libs.push("mkl_intel_thread");
+    // } else {
+    //     libs.push("mkl_sequential");
+    // };
+    //
+    // libs.push("mkl_core");
 
     if cfg!(feature = "openmp") {
         libs.push("iomp5");
@@ -184,6 +195,27 @@ fn get_static_link_libs_macos() -> Vec<String> {
     libs.into_iter().map(|s| s.into()).collect()
 }
 
+fn get_static_link_libs_linux() -> Vec<String> {
+    // Note: The order of the libraries is very important
+    let mut libs = Vec::new();
+
+    if cfg!(feature = "ilp64") {
+        libs.push("mkl_intel_ilp64");
+    } else {
+        libs.push("mkl_intel_lp64");
+    };
+
+    if cfg!(feature = "openmp") {
+        libs.push("mkl_intel_thread");
+    } else {
+        libs.push("mkl_sequential");
+    };
+
+    libs.push("mkl_core");
+
+    libs.into_iter().map(|s| s.into()).collect()
+}
+
 fn get_dynamic_link_libs() -> Vec<String> {
     if cfg!(target_os = "windows") {
         get_dynamic_link_libs_windows()
@@ -200,7 +232,7 @@ fn get_static_link_libs() -> Vec<String> {
     if cfg!(target_os = "windows") {
         vec![]
     } else if cfg!(target_os = "linux") {
-        vec![]
+        get_static_link_libs_linux()
     } else if cfg!(target_os = "macos") {
         get_static_link_libs_macos()
     } else {
@@ -338,31 +370,31 @@ with oneAPI in order to set up the required environment variables."),
         {
             let dss_regex = "(dss_.*)|(DSS_.*)|(MKL_DSS.*)";
             builder = builder
-                .whitelist_function(dss_regex)
-                .whitelist_type(dss_regex)
-                .whitelist_var(dss_regex);
+                .allowlist_function(dss_regex)
+                .allowlist_type(dss_regex)
+                .allowlist_var(dss_regex);
         }
 
         #[cfg(feature = "sparse-matrix-checker")]
         {
             builder = builder
-                .whitelist_function("sparse_matrix_checker*")
-                .whitelist_function("sparse_matrix_checker_init*");
+                .allowlist_function("sparse_matrix_checker*")
+                .allowlist_function("sparse_matrix_checker_init*");
         }
 
         #[cfg(feature = "extended-eigensolver")]
         {
             builder = builder
-                .whitelist_function(".*feast.*")
-                .whitelist_function("mkl_sparse_ee_init")
-                .whitelist_function("mkl_sparse_._svd")
-                .whitelist_function("mkl_sparse_._ev")
-                .whitelist_function("mkl_sparse_._gv");
+                .allowlist_function(".*feast.*")
+                .allowlist_function("mkl_sparse_ee_init")
+                .allowlist_function("mkl_sparse_._svd")
+                .allowlist_function("mkl_sparse_._ev")
+                .allowlist_function("mkl_sparse_._gv");
         }
 
         #[cfg(feature = "inspector-executor")]
         {
-            builder = builder.whitelist_function("mkl_sparse_.*");
+            builder = builder.allowlist_function("mkl_sparse_.*");
         }
     }
 
