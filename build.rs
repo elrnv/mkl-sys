@@ -13,7 +13,7 @@ struct OneAPIDirectories {
 
 impl OneAPIDirectories {
     /// Constructs paths required for linking MKL from the specified root folder. Checks if paths exist.
-    fn try_new(oneapi_root: &str) -> Result<Self, String> {
+    fn try_from_root(oneapi_root: &str) -> Result<Self, String> {
         let os = if cfg!(target_os = "windows") {
             "win"
         } else if cfg!(target_os = "linux") {
@@ -118,6 +118,75 @@ impl OneAPIDirectories {
             include_dir: include_dir_str.into(),
         })
     }
+
+    /// Constructs paths required for linking MKL using system paths.
+    ///
+    /// Checks if paths exist.
+    fn try_system() -> Result<Self, String> {
+        if !cfg!(target_os = "linux") {
+            return Err("Cannot determine default MKL installation path in target OS".into());
+        };
+
+        let lib_dir = "/lib/x86_64-linux-gnu".to_string();
+        let tbb_lib_dir = lib_dir.clone();
+        let omp_lib_dir = lib_dir.clone();
+        let include_dir = format!("/usr/include/mkl");
+
+        let lib_dir_path = PathBuf::from(lib_dir);
+        let omp_lib_dir_path = PathBuf::from(omp_lib_dir);
+        let tbb_lib_dir_path = PathBuf::from(tbb_lib_dir);
+        let include_dir_path = PathBuf::from(include_dir);
+
+        let lib_dir_str = lib_dir_path
+            .to_str()
+            .ok_or("Unable to convert 'lib_dir_path' to string")?;
+        let omp_lib_dir_str = omp_lib_dir_path
+            .to_str()
+            .ok_or("Unable to convert 'omp_lib_dir_path' to string")?;
+        let tbb_lib_dir_str = tbb_lib_dir_path
+            .to_str()
+            .ok_or("Unable to convert 'tbb_lib_dir_path' to string")?;
+        let include_dir_str = include_dir_path
+            .to_str()
+            .ok_or("Unable to convert 'include_dir_path' to string")?;
+
+        // Check if paths exist
+
+        if !lib_dir_path.exists() {
+            println!(
+                "cargo:warning=The 'lib_dir_path' folder with path '{}' does not exist.",
+                lib_dir_str
+            );
+        }
+
+        if cfg!(feature = "openmp") && !omp_lib_dir_path.exists() {
+            println!(
+                "cargo:warning=The 'omp_lib_dir_path' folder with path '{}' does not exist.",
+                omp_lib_dir_str
+            );
+        }
+
+        if cfg!(feature = "tbb") && !tbb_lib_dir_path.exists() {
+            println!(
+                "cargo:warning=The 'tbb_lib_dir_path' folder with path '{}' does not exist.",
+                tbb_lib_dir_str
+            );
+        }
+
+        if !include_dir_path.exists() {
+            println!(
+                "cargo:warning=The 'include_dir_path' folder with path '{}' does not exist.",
+                include_dir_str
+            );
+        }
+
+        Ok(OneAPIDirectories {
+            lib_dir: lib_dir_str.into(),
+            omp_lib_dir: omp_lib_dir_str.into(),
+            tbb_lib_dir: tbb_lib_dir_str.into(),
+            include_dir: include_dir_str.into(),
+        })
+    }
 }
 
 fn get_lib_dirs(oneapi_dirs: &OneAPIDirectories) -> Vec<String> {
@@ -164,6 +233,8 @@ fn get_dynamic_link_libs_linux() -> Vec<String> {
     } else if cfg!(feature = "tbb") {
         libs.push("tbb");
     }
+    // stdc++ is only needed for more recent MKL versions.
+    // Adding it here anyways since most systems will have this dependency anyways.
     libs.extend(vec!["pthread", "m", "dl", "stdc++"]);
 
     libs.into_iter().map(|s| s.into()).collect()
@@ -365,7 +436,11 @@ with oneAPI in order to set up the required environment variables.");
         };
 
         let oneapi_dirs = oneapi_root.as_ref().and_then(|oneapi_root| {
-            OneAPIDirectories::try_new(oneapi_root)
+            OneAPIDirectories::try_from_root(oneapi_root)
+                .map_err(|err| println!("WARNING: {}", err))
+                .ok()
+        }).or_else(|| {
+            OneAPIDirectories::try_system()
                 .map_err(|err| println!("WARNING: {}", err))
                 .ok()
         });

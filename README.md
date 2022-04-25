@@ -50,6 +50,16 @@ opt-level = 2
 This ensures that bindgen is compiled with optimizations on, significantly improving its runtime when
 invoked by the build script in `mkl-sys`.
 
+- If you see an error message when trying to build `mkl-sys` like the following:
+```verbatim
+  = note: /usr/bin/ld: /lib/x86_64-linux-gnu/libmkl_core.a(mkl_get_mpi_wrappers_static.o): in function `mkl_serv_get_mpi_wrappers':
+          mkl_get_mpi_wrappers.c:(.text+0x4b): undefined reference to `MKLMPI_Get_wrappers'
+          collect2: error: ld returned 1 exit status
+```
+
+It is most likely that downstream builds will succeed if they don't use that symbol. To test if that
+is the case try to build `mkl-corrode`.
+
 ## License
 Intel MKL is provided by Intel and licensed separately.
 
