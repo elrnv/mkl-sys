@@ -10,12 +10,14 @@ build = "build.rs"
 # Intel MKL module selection
 all = []
 dss = []
+axpy = []
 sparse-matrix-checker = []
 extended-eigensolver = []
 inspector-executor = []
 
 # Configurations
 openmp = []
+tbb = []
 ilp64 = []
 
 [dependencies]
