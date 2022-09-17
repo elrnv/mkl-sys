@@ -12,10 +12,22 @@ struct InstallationDirectories {
 }
 
 impl InstallationDirectories {
-    /// Constructs paths required for linking MKL from the specified root folder. Checks if paths exist.
+    /// Constructs paths required for linking MKL from the root folder specified in env.
+    ///
+    /// Checks if paths exist.
+    fn try_from_env_root() -> Result<Self, String> {
+        env::var("ONEAPI_ROOT")
+        .map_err(|err|
+            format!("ONEAPI_ROOT {err} -- remember to run the setvars script bundled with oneAPI in order to set up the required environment variables")
+        ).and_then(|oneapi_root| Self::try_from_root(&oneapi_root))
+    }
+
+    /// Constructs paths required for linking MKL from the specified root folder.
+    ///
+    /// Checks if paths exist.
     fn try_from_root(root: &str) -> Result<Self, String> {
         let os = if cfg!(target_os = "windows") {
-            "win"
+            "windows"
         } else if cfg!(target_os = "linux") {
             "linux"
         } else if cfg!(target_os = "macos") {
@@ -28,6 +40,8 @@ impl InstallationDirectories {
         let itype = "intel64";
         let omp_lib_subdir = if cfg!(target_os = "linux") {
             format!("/{}_lin", itype)
+        } else if cfg!(target_os = "windows") {
+            format!("/{}_win", itype)
         } else {
             String::new()
         };
@@ -88,10 +102,35 @@ impl InstallationDirectories {
         Self::try_custom(&mkl_lib_dir, &include_dir, &tbb_lib_dir, &omp_lib_dir)
     }
 
+    /// Constructs paths required for linking MKL from specific environment variables.
+    ///
+    /// Checks if paths exist.
+    fn try_custom_env() -> Result<Self, String> {
+        let mkl_lib_dir = env::var("MKL_LIB_DIR").map_err(|err| format!("MKL_LIB_DIR {err}"))?;
+        let mkl_include_dir =
+            env::var("MKL_INCLUDE_DIR").map_err(|err| format!("MKL_INCLUDE_DIR {err}"))?;
+        let tbb_lib_dir = if cfg!(feature = "tbb") {
+            env::var("TBB_LIB_DIR").map_err(|err| format!("TBB_LIB_DIR {err}"))?
+        } else {
+            String::new()
+        };
+        let omp_lib_dir = if cfg!(feature = "openmp") {
+            env::var("OMP_LIB_DIR").map_err(|err| format!("OMP_LIB_DIR {err}"))?
+        } else {
+            String::new()
+        };
+        Self::try_custom(&mkl_lib_dir, &mkl_include_dir, &tbb_lib_dir, &omp_lib_dir)
+    }
+
     /// Constructs paths required for linking MKL using custom paths.
     ///
     /// Checks if paths exist.
-    fn try_custom(mkl_lib_dir: &str, mkl_include_dir: &str, tbb_lib_dir: &str, omp_lib_dir: &str) -> Result<Self, String> {
+    fn try_custom(
+        mkl_lib_dir: &str,
+        mkl_include_dir: &str,
+        tbb_lib_dir: &str,
+        omp_lib_dir: &str,
+    ) -> Result<Self, String> {
         let mkl_lib_dir_path = PathBuf::from(mkl_lib_dir);
         let omp_lib_dir_path = PathBuf::from(omp_lib_dir);
         let tbb_lib_dir_path = PathBuf::from(tbb_lib_dir);
@@ -165,8 +204,8 @@ fn get_dynamic_link_libs_windows() -> Vec<String> {
 
     if cfg!(feature = "openmp") {
         libs.push("libiomp5md");
-   } else if cfg!(feature = "tbb") {
-       libs.push("tbb");
+    } else if cfg!(feature = "tbb") {
+        libs.push("tbb");
     }
 
     libs.into_iter().map(|s| s.into()).collect()
@@ -391,44 +430,23 @@ like to generate symbols for all modules."
     // Link with the proper MKL libraries and simultaneously set up arguments for bindgen.
     // Otherwise we don't get e.g. the correct MKL preprocessor definitions).
     let clang_args = {
-        let oneapi_root = match env::var("ONEAPI_ROOT") {
-            Ok(oneapi_root) => Some(oneapi_root),
-            Err(_) => {
-                println!(
-"WARNING: Environment variable 'ONEAPI_ROOT' is not defined. Remember to run the setvars script bundled
-with oneAPI in order to set up the required environment variables.");
-                None
-            }
-        };
-
-        let install_dirs = oneapi_root.as_ref().and_then(|oneapi_root| {
-            InstallationDirectories::try_from_root(oneapi_root)
-                .map_err(|err| println!("WARNING: {}", err))
-                .ok()
-        }).or_else(|| {
-            InstallationDirectories::try_system()
-                .map_err(|err| println!("WARNING: {}", err))
-                .ok()
-        }).or_else(|| {
-            // Try loading fully custom paths.
-            // This is useful when MKL is installed by another package manager like NuGet on windows.
-            let mkl_lib_dir = env::var("MKL_LIB_DIR").expect("WARNING: MKL_LIB_DIR not found.\nERROR: could not determine MKL installation.");
-            let mkl_include_dir = env::var("MKL_INCLUDE_DIR").expect("WARNING: MKL_INCLUDE_DIR not found.\nERROR: could not determine MKL installation.");
-            let tbb_lib_dir = if cfg!(feature = "tbb") {
-                env::var("TBB_LIB_DIR").expect("WARNING: TBB_LIB_DIR not found.\nERROR: could not determine TBB installation.")
-            } else {
-                String::new()
-            };
-            let omp_lib_dir = if cfg!(feature = "openmp") {
-                env::var("OMP_LIB_DIR").expect("WARNING: OMP_LIB_DIR not found.\nERROR: could not determine OpenML installation.")
-            } else {
-                String::new()
-            };
-            InstallationDirectories::try_custom(&mkl_lib_dir, &mkl_include_dir, &tbb_lib_dir, &omp_lib_dir)
-                .map_err(|err| println!("WARNING: {}", err))
-                .ok()
-        });
-
+        // First try loading fully custom paths. This serves as a potential override to the "usual" way of installing MKL.
+        // This is also useful when MKL is installed by another package manager like NuGet on windows.
+        let install_dirs = InstallationDirectories::try_custom_env()
+            .map_err(|err| println!("WARNING: {}", err))
+            .ok()
+            .or_else(|| {
+                // Next try using the environment variable for ONEAPI_ROOT.
+                InstallationDirectories::try_from_env_root()
+                    .map_err(|err| println!("WARNING: {}", err))
+                    .ok()
+            })
+            .or_else(|| {
+                // Finally try a system installed version of MKL.
+                InstallationDirectories::try_system()
+                    .map_err(|err| println!("WARNING: {}", err))
+                    .ok()
+            });
 
         if let Some(install_dirs) = install_dirs.as_ref() {
             for lib_dir in get_lib_dirs(install_dirs) {
@@ -441,7 +459,7 @@ with oneAPI in order to set up the required environment variables.");
         }
 
         for lib in get_dynamic_link_libs() {
-            println!("cargo:rustc-link-lib=dylib={}", lib);
+            println!("cargo:rustc-link-lib={}", lib);
         }
 
         let args = get_cflags(install_dirs.as_ref());
