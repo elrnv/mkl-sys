@@ -202,9 +202,7 @@ fn get_dynamic_link_libs_windows() -> Vec<String> {
     // Note: The order of the libraries is very important
     let mut libs = Vec::new();
 
-    if cfg!(feature = "openmp") {
-        libs.push("libiomp5md");
-    } else if cfg!(feature = "tbb") {
+    if cfg!(feature = "tbb") {
         libs.push("tbb");
     }
 
@@ -257,6 +255,10 @@ fn get_static_link_libs_windows() -> Vec<String> {
     };
 
     libs.push("mkl_core");
+
+    if cfg!(feature = "openmp") {
+        libs.push("libiomp5md");
+    }
 
     libs.into_iter().map(|s| s.into()).collect()
 }
