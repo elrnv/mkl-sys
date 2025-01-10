@@ -26,25 +26,8 @@ impl InstallationDirectories {
     ///
     /// Checks if paths exist.
     fn try_from_root(root: &str) -> Result<Self, String> {
-        let os = if cfg!(target_os = "windows") {
-            "windows"
-        } else if cfg!(target_os = "linux") {
-            "linux"
-        } else if cfg!(target_os = "macos") {
-            "mac"
-        } else {
-            return Err("Target OS not supported".into());
-        };
-
         // TODO determine if we need to support ia32 as well
         let itype = "intel64";
-        let omp_lib_subdir = if cfg!(target_os = "linux") {
-            format!("/{}_lin", itype)
-        } else if cfg!(target_os = "windows") {
-            format!("/{}_win", itype)
-        } else {
-            String::new()
-        };
 
         let tbb_lib_subdir = if cfg!(target_os = "linux") {
             format!("/{}/gcc4.8", itype)
@@ -54,18 +37,12 @@ impl InstallationDirectories {
             String::new()
         };
 
-        let lib_subdir = if cfg!(target_os = "linux") || cfg!(target_os = "windows") {
-            format!("/{}", itype)
-        } else {
-            String::new()
-        };
-
         let tbb_root: String = format!("{}/tbb/latest", root);
         let mkl_root: String = format!("{}/mkl/latest", root);
         let compiler_root: String = format!("{}/compiler/latest", root);
-        let mkl_lib_dir = format!("{mkl_root}/lib{lib_subdir}",);
+        let mkl_lib_dir = format!("{mkl_root}/lib",);
         let tbb_lib_dir = format!("{tbb_root}/lib{tbb_lib_subdir}",);
-        let omp_lib_dir = format!("{compiler_root}/{os}/compiler/lib{omp_lib_subdir}",);
+        let omp_lib_dir = format!("{compiler_root}/lib",);
         let include_dir = format!("{}/include", mkl_root);
 
         let mkl_root_path = PathBuf::from(mkl_root);
